@@ -49,6 +49,83 @@ pub struct ProcessControlBlockInner {
     pub semaphore_list: Vec<Option<Arc<Semaphore>>>,
     /// condvar list
     pub condvar_list: Vec<Option<Arc<Condvar>>>,
+    /// dead lock detection flag
+    pub enbale_dead_lock_detection: bool,
+    /// mutex detection
+    pub mutex_detection: DeadLockDetection,
+    /// semaphore detection
+    pub semaphore_detection: DeadLockDetection,
+}
+
+#[derive(Debug, Clone)]
+pub struct DeadLockDetection {
+    /// m : resource
+    pub available: Vec<usize>,
+    /// n * m
+    /// n: threads
+    /// m: resource
+    pub allocation: Vec<Vec<usize>>,
+    /// n * m
+    pub need: Vec<Vec<usize>>,
+}
+
+impl DeadLockDetection {
+    pub fn new() -> DeadLockDetection {
+        DeadLockDetection {
+            available: vec![],
+            allocation: vec![vec![]],
+            need: vec![vec![]],
+        }
+    }
+    /// add new thread
+    pub fn add_thread(&mut self) {
+        let m = self.available.len();
+        self.allocation.push(vec![0; m]);
+        self.need.push(vec![0; m]);
+    }
+
+    /// check if there's a dead lock
+    pub fn check(&self) -> bool {
+        let mut work = self.available.clone();
+        let mut finish = vec![false; self.allocation.len()];
+        let m = self.available.len();
+        let n = self.allocation.len();
+        debug!("{} threads, {} resources", n, m);
+
+        let mut cnt = 0;
+        loop {
+            let mut found = false;
+            for i in 0..n {
+                if !finish[i] {
+                    let mut flag = true;
+                    for j in 0..m {
+                        if self.need[i][j] > work[j] {
+                            flag = false;
+                            break;
+                        }
+                    }
+                    if flag {
+                        for j in 0..m {
+                            // debug!("need({},{})={}, work({})={}", i, j, self.need[i][j], j, work[j]);
+                            work[j] += self.allocation[i][j];
+
+                            debug!("thread {} get recource {}", i, j);
+                        }
+                        finish[i] = true;
+                        cnt += 1;
+                        found = true;
+                    }
+                }
+            }
+            if !found {
+                break;
+            }
+        }
+        if cnt == n {
+            return true;
+        }
+        false
+    }
 }
 
 impl ProcessControlBlockInner {
@@ -119,6 +196,9 @@ impl ProcessControlBlock {
                     mutex_list: Vec::new(),
                     semaphore_list: Vec::new(),
                     condvar_list: Vec::new(),
+                    enbale_dead_lock_detection: false,
+                    mutex_detection: DeadLockDetection::new(),
+                    semaphore_detection: DeadLockDetection::new(),
                 })
             },
         });
@@ -245,6 +325,9 @@ impl ProcessControlBlock {
                     mutex_list: Vec::new(),
                     semaphore_list: Vec::new(),
                     condvar_list: Vec::new(),
+                    enbale_dead_lock_detection: parent.enbale_dead_lock_detection,
+                    mutex_detection: parent.mutex_detection.clone(),
+                    semaphore_detection: parent.semaphore_detection.clone(),
                 })
             },
         });
